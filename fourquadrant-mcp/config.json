@@ -1,0 +1,26 @@
+{
+  "android": {
+    "host": "192.168.1.100",
+    "port": 8080,
+    "timeout": 10,
+    "max_retries": 3,
+    "retry_delay": 2
+  },
+  "server": {
+    "name": "fourquadrant-mcp",
+    "version": "1.0.0",
+    "description": "四象限MCP服务器 - 时间管理AI助手"
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "fourquadrant_mcp.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  },
+  "features": {
+    "auto_retry": true,
+    "debug_mode": false,
+    "enable_statistics": true,
+    "enable_notifications": true
+  }
+}
