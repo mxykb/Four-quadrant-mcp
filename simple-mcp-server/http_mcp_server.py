@@ -45,19 +45,21 @@ if sys.platform == 'win32':
         # 如果设置失败，忽略错误继续运行
         pass
 
-# LangChain imports
+# 导入LangChain处理模块
 try:
-    from langchain_openai import ChatOpenAI
-    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-    from langchain_core.prompts import ChatPromptTemplate
-    from langchain.agents import create_openai_functions_agent, AgentExecutor
-    from langchain.tools import BaseTool
-    from langchain_core.tools import tool
-    LANGCHAIN_AVAILABLE = True
+    from langchain_handler import chat_with_langchain, LANGCHAIN_AVAILABLE
 except ImportError:
-    print("⚠️  LangChain未安装，聊天功能将不可用")
-    print("💡 安装命令: pip install langchain langchain-openai")
+    print("⚠️  LangChain处理模块导入失败")
     LANGCHAIN_AVAILABLE = False
+    
+    async def chat_with_langchain(message: str, api_key: str = None, deepseek_api_key: str = None, 
+                                model: str = "gpt-3.5-turbo", temperature: float = 0.7, max_tokens: int = 1000) -> dict:
+        return {
+            "success": False,
+            "error": "LangChain处理模块不可用",
+            "result": None,
+            "tool_calls": []
+        }
 
 # 请求和响应模型
 class ToolCallRequest(BaseModel):
@@ -92,17 +94,21 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = 1000
 
-class ToolCall(BaseModel):
-    tool_name: str
-    arguments: Dict[str, Any]
-    result: Optional[str] = None
+# 从langchain_handler导入响应模型
+try:
+    from langchain_handler import ToolCall, ChatResponse
+except ImportError:
+    class ToolCall(BaseModel):
+        tool_name: str
+        arguments: Dict[str, Any]
+        result: Optional[str] = None
 
-class ChatResponse(BaseModel):
-    success: bool
-    result: Optional[str] = None
-    error: Optional[str] = None
-    tool_calls: Optional[List[ToolCall]] = None
-    model_used: Optional[str] = None
+    class ChatResponse(BaseModel):
+        success: bool
+        result: Optional[str] = None
+        error: Optional[str] = None
+        tool_calls: Optional[List[ToolCall]] = None
+        model_used: Optional[str] = None
 
 # WebSocket相关模型
 class WebSocketMessage(BaseModel):
@@ -286,283 +292,7 @@ TOOL_FUNCTIONS = {
     "list_files": list_files_impl
 }
 
-# LangChain工具包装器
-if LANGCHAIN_AVAILABLE:
-    @tool
-    def read_file_tool(file_path: str) -> str:
-        """读取文件内容"""
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(read_file_impl(file_path))
-        except Exception as e:
-            return f"读取文件失败: {str(e)}"
-    
-    @tool
-    def write_file_tool(file_path: str, content: str) -> str:
-        """写入文件内容"""
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(write_file_impl(file_path, content))
-        except Exception as e:
-            return f"写入文件失败: {str(e)}"
-    
-    @tool
-    def list_files_tool(directory_path: str) -> str:
-        """列出目录中的文件"""
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(list_files_impl(directory_path))
-        except Exception as e:
-            return f"列出文件失败: {str(e)}"
-    
-    # 可用的LangChain工具列表
-    LANGCHAIN_TOOLS = [read_file_tool, write_file_tool, list_files_tool]
-    
-    # 聊天功能实现
-    async def chat_with_langchain(message: str, api_key: str = None, deepseek_api_key: str = None, 
-                                model: str = "gpt-3.5-turbo", temperature: float = 0.7, max_tokens: int = 1000) -> dict:
-        """使用LangChain进行聊天"""
-        if not LANGCHAIN_AVAILABLE:
-            return {
-                "success": False,
-                "error": "LangChain未安装。请运行: pip install langchain langchain-openai",
-                "result": None,
-                "tool_calls": []
-            }
-        
-        try:
-            # 判断是否为DeepSeek模型
-            is_deepseek = model.startswith('deepseek')
-            
-            if is_deepseek:
-                if not deepseek_api_key:
-                    return {
-                        "success": False,
-                        "error": "需要提供DeepSeek API密钥",
-                        "result": None,
-                        "tool_calls": []
-                    }
-                # 创建DeepSeek模型配置
-                llm = ChatOpenAI(
-                    api_key=deepseek_api_key,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    base_url="https://api.deepseek.com"
-                )
-            else:
-                if not api_key:
-                    return {
-                        "success": False,
-                        "error": "需要提供OpenAI API密钥",
-                        "result": None,
-                        "tool_calls": []
-                    }
-                # 创建OpenAI模型配置
-                llm = ChatOpenAI(
-                    api_key=api_key,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-            
-            # 根据模型类型选择不同的Agent策略
-            if is_deepseek:
-                # DeepSeek模型使用简化的工具调用方式
-                # 直接绑定工具，不使用复杂的Agent
-                llm_with_tools = llm.bind_tools(LANGCHAIN_TOOLS)
-                
-                # 创建简单的系统提示
-                system_message = SystemMessage(content="""
-你是一个有用的AI助手。当用户需要文件操作时，你必须使用相应的工具：
-- 创建或写入文件时，使用write_file工具
-- 读取文件时，使用read_file工具  
-- 列出目录文件时，使用list_files工具
 
-请直接调用工具来完成用户的请求。
-""")
-                
-                # 发送消息并处理工具调用
-                messages = [system_message, HumanMessage(content=message)]
-                response = await llm_with_tools.ainvoke(messages)
-                
-                # 添加调试日志
-                logger.info(f"🔍 DeepSeek响应类型: {type(response)}")
-                logger.info(f"🔍 DeepSeek响应属性: {dir(response)}")
-                logger.info(f"🔍 DeepSeek响应内容: {response.content[:200]}...")
-                if hasattr(response, 'tool_calls'):
-                    logger.info(f"🔍 DeepSeek工具调用: {response.tool_calls}")
-                
-                # 处理工具调用
-                tool_calls = []
-                tool_messages = []
-                
-                if hasattr(response, 'tool_calls') and response.tool_calls:
-                    for tool_call in response.tool_calls:
-                        try:
-                            # 处理不同格式的tool_call
-                            if isinstance(tool_call, dict):
-                                tool_name = tool_call.get('name')
-                                tool_args = tool_call.get('args', {})
-                                tool_call_id = tool_call.get('id', f"call_{len(tool_calls)}")
-                            else:
-                                # 处理对象格式的tool_call
-                                tool_name = getattr(tool_call, 'name', None)
-                                tool_args = getattr(tool_call, 'args', {})
-                                tool_call_id = getattr(tool_call, 'id', f"call_{len(tool_calls)}")
-                            
-                            logger.info(f"🔧 准备执行工具: {tool_name}, 参数: {tool_args}, ID: {tool_call_id}")
-                            
-                            # 处理工具名称映射（LangChain工具名 -> 实际函数名）
-                            tool_name_mapping = {
-                                'write_file_tool': 'write_file',
-                                'read_file_tool': 'read_file',
-                                'list_files_tool': 'list_files'
-                            }
-                            
-                            actual_tool_name = tool_name_mapping.get(tool_name, tool_name)
-                            logger.info(f"🔄 工具名称映射: {tool_name} -> {actual_tool_name}")
-                            
-                            if tool_name and actual_tool_name in TOOL_FUNCTIONS:
-                                tool_result = await TOOL_FUNCTIONS[actual_tool_name](**tool_args)
-                                tool_calls.append({
-                                    "tool_name": tool_name,
-                                    "arguments": tool_args,
-                                    "result": tool_result
-                                })
-                                
-                                # 创建正确的ToolMessage
-                                tool_messages.append(ToolMessage(
-                                    content=str(tool_result),
-                                    tool_call_id=tool_call_id
-                                ))
-                                
-                                logger.info(f"✅ 工具执行成功: {tool_name}, 结果: {tool_result}")
-                                
-                            else:
-                                logger.warning(f"⚠️  未知工具或工具名为空: {tool_name}")
-                                # 为未知工具也创建ToolMessage
-                                error_msg = f"未知工具: {tool_name}"
-                                tool_messages.append(ToolMessage(
-                                    content=error_msg,
-                                    tool_call_id=tool_call_id
-                                ))
-                                tool_calls.append({
-                                    "tool_name": tool_name if tool_name else 'unknown',
-                                    "arguments": tool_args if tool_args else {},
-                                    "result": error_msg
-                                })
-                                
-                        except Exception as e:
-                            logger.error(f"❌ 工具执行异常: {str(e)}")
-                            error_msg = f"工具执行错误: {str(e)}"
-                            tool_messages.append(ToolMessage(
-                                content=error_msg,
-                                tool_call_id=tool_call_id if 'tool_call_id' in locals() else f"call_error_{len(tool_calls)}"
-                            ))
-                            tool_calls.append({
-                                "tool_name": tool_name if tool_name else 'unknown',
-                                "arguments": tool_args if tool_args else {},
-                                "result": error_msg
-                            })
-                    
-                    # 如果有工具调用，发送工具结果给模型获取最终回复
-                    if tool_messages:
-                        try:
-                            final_messages = messages + [response] + tool_messages
-                            final_response = await llm.ainvoke(final_messages)
-                            
-                            result = {
-                                "success": True,
-                                "error": None,
-                                "result": final_response.content,
-                                "tool_calls": tool_calls,
-                                "model_used": model
-                            }
-                        except Exception as e:
-                            logger.error(f"❌ 获取最终回复失败: {str(e)}")
-                            result = {
-                                "success": True,
-                                "error": None,
-                                "result": f"工具执行完成。{tool_calls[0]['result'] if tool_calls else '无结果'}",
-                                "tool_calls": tool_calls,
-                                "model_used": model
-                            }
-                    else:
-                        result = {
-                            "success": False,
-                            "error": "工具调用处理失败",
-                            "result": None,
-                            "tool_calls": tool_calls,
-                            "model_used": model
-                        }
-                
-                # 如果没有工具调用，直接返回响应
-                else:
-                    result = {
-                        "success": True,
-                        "error": None,
-                        "result": response.content,
-                        "tool_calls": [],
-                        "model_used": model
-                    }
-                
-            else:
-                 # OpenAI模型使用Functions Agent
-                 system_prompt = ChatPromptTemplate.from_messages([
-                     ("system", "你是一个有用的AI助手，可以使用以下工具来帮助用户：\n"
-                               "1. read_file: 读取文件内容\n"
-                               "2. write_file: 写入文件内容\n"
-                               "3. list_files: 列出目录中的文件\n\n"
-                               "当用户需要文件操作时，请主动使用相应的工具。"
-                               "例如，当用户要求创建文件时，使用write_file工具。"),
-                     ("human", "{input}"),
-                     ("placeholder", "{agent_scratchpad}")
-                 ])
-                 
-                 agent = create_openai_functions_agent(llm, LANGCHAIN_TOOLS, system_prompt)
-                 agent_executor = AgentExecutor(agent=agent, tools=LANGCHAIN_TOOLS, verbose=True)
-                 
-                 # 执行Agent
-                 result = await agent_executor.ainvoke({"input": message})
-                 
-                 # 提取工具调用信息
-                 tool_calls = []
-                 if 'intermediate_steps' in result:
-                     for step in result['intermediate_steps']:
-                         if len(step) >= 2:
-                             action, observation = step[0], step[1]
-                             tool_calls.append({
-                                 "tool_name": action.tool,
-                                 "arguments": action.tool_input,
-                                 "result": str(observation)
-                             })
-                 
-                 return {
-                     "success": True,
-                     "error": None,
-                     "result": result['output'],
-                     "tool_calls": tool_calls,
-                     "model_used": model
-                 }
-            
-            # 返回DeepSeek的处理结果
-            return result
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"LangChain处理错误: {str(e)}",
-                "result": None,
-                "tool_calls": []
-            }
-else:
-    async def chat_with_langchain(message: str, api_key: str, model: str = "gpt-3.5-turbo", 
-                                temperature: float = 0.7, max_tokens: int = 1000) -> ChatResponse:
-        return ChatResponse(
-            success=False,
-            error="LangChain未安装，请先安装: pip install langchain langchain-openai"
-        )
 
 # API路由
 @app.get("/", response_model=ServerInfoResponse)
