@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP LangChain 交互式聊天</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .chat-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 1200px;
+            height: 90vh;
+            min-height: 600px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 5px;
+            }
+            
+            .chat-container {
+                height: 95vh;
+                border-radius: 10px;
+                max-width: 100%;
+            }
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .chat-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .chat-header .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4CAF50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            scroll-behavior: smooth;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: flex-start;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .error-content, .success-content, .warning-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .error-icon, .success-icon, .warning-icon {
+            font-size: 1.2em;
+            flex-shrink: 0;
+        }
+
+        .error-text, .success-text, .warning-text {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .error-details {
+            width: 100%;
+            margin-top: 5px;
+            padding: 5px 8px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: monospace;
+        }
+
+        .retry-button, .action-button {
+            padding: 4px 8px;
+            font-size: 0.8em;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            margin-left: auto;
+            transition: all 0.2s;
+        }
+
+        .retry-button {
+            background: #f44336;
+            color: white;
+        }
+
+        .retry-button:hover {
+            background: #d32f2f;
+        }
+
+        .action-button {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .action-button:hover {
+            background: #ffb300;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-content {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            margin: 0 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 14px;
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            order: 1;
+        }
+
+        .message.assistant .message-avatar {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 12px 16px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 18px;
+            border-bottom-left-radius: 4px;
+            max-width: 70%;
+        }
+
+        .typing-dots {
+            display: flex;
+            align-items: center;
+        }
+
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #999;
+            margin: 0 2px;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
+        .chat-input {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .input-container {
+            display: flex;
+            align-items: center;
+            background: #f8f9fa;
+            border-radius: 25px;
+            padding: 5px;
+            border: 2px solid transparent;
+            transition: border-color 0.3s;
+        }
+
+        .input-container:focus-within {
+            border-color: #667eea;
+        }
+
+        .message-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            padding: 12px 16px;
+            background: transparent;
+            font-size: 16px;
+            resize: none;
+            max-height: 120px;
+            min-height: 20px;
+        }
+
+        .send-button {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+            margin-left: 5px;
+        }
+
+        .send-button:hover {
+            transform: scale(1.05);
+        }
+
+        .send-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .config-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            display: none;
+            min-width: 300px;
+            max-width: 400px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .config-panel h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 18px;
+        }
+
+        .config-item {
+            margin-bottom: 15px;
+        }
+
+        .config-item label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .config-item input,
+        .config-item select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .config-item input:focus,
+        .config-item select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .config-item input[type="range"] {
+            padding: 0;
+        }
+
+        .config-item input[type="checkbox"] {
+            width: auto;
+            margin-right: 8px;
+        }
+
+        .config-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .config-actions button {
+            flex: 1;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .config-actions button:hover {
+            background: #5a6fd8;
+        }
+
+        .config-actions button:nth-child(2) {
+            background: #6c757d;
+        }
+
+        .config-actions button:nth-child(2):hover {
+            background: #5a6268;
+        }
+
+        .config-actions button:last-child {
+            background: #dc3545;
+        }
+
+        .config-actions button:last-child:hover {
+            background: #c82333;
+        }
+
+        .config-toggle {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: white;
+            border: none;
+            padding: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            z-index: 1001;
+        }
+
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #c62828;
+        }
+
+        .success-message {
+            background: #e8f5e8;
+            color: #2e7d32;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #2e7d32;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .chat-container {
+                width: 95%;
+                height: 95vh;
+                border-radius: 10px;
+            }
+
+            .message-content {
+                max-width: 85%;
+            }
+
+            .chat-header h1 {
+                font-size: 20px;
+            }
+
+            .chat-header {
+                padding: 15px;
+            }
+            
+            .chat-messages {
+                padding: 15px;
+            }
+            
+            .chat-input {
+                padding: 15px;
+            }
+            
+            .config-panel {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                max-width: none;
+                min-width: auto;
+                padding: 15px;
+                border-radius: 10px;
+            }
+            
+            .config-item {
+                margin-bottom: 12px;
+            }
+            
+            .config-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .config-toggle {
+                top: 10px;
+                left: 10px;
+                padding: 8px;
+                font-size: 16px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .chat-container {
+                border-radius: 0;
+                height: 100vh;
+                width: 100%;
+            }
+            
+            .chat-header {
+                padding: 12px;
+            }
+            
+            .chat-header h1 {
+                font-size: 18px;
+            }
+            
+            .chat-header .subtitle {
+                font-size: 12px;
+            }
+            
+            .chat-messages {
+                padding: 10px;
+            }
+            
+            .chat-input {
+                padding: 10px;
+            }
+            
+            .message-content {
+                max-width: 90%;
+                padding: 10px 14px;
+                font-size: 14px;
+            }
+            
+            .config-panel {
+                top: 5px;
+                left: 5px;
+                right: 5px;
+                padding: 12px;
+                max-height: 85vh;
+            }
+            
+            .config-panel h3 {
+                font-size: 16px;
+                margin-bottom: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="config-toggle" onclick="toggleConfig()">⚙️</button>
+    
+    <div class="config-panel" id="configPanel">
+        <h3>🔧 配置设置</h3>
+        <div class="config-item">
+            <label for="serverUrl">服务器地址:</label>
+            <input type="text" id="serverUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+        </div>
+        <div class="config-item">
+            <label for="apiKey">OpenAI API密钥:</label>
+            <input type="password" id="apiKey" placeholder="请输入OpenAI API密钥">
+        </div>
+        <div class="config-item">
+            <label for="deepseekApiKey">DeepSeek API密钥:</label>
+            <input type="password" id="deepseekApiKey" placeholder="请输入DeepSeek API密钥">
+        </div>
+        <div class="config-item">
+            <label for="modelSelect">模型选择:</label>
+            <select id="modelSelect">
+                <optgroup label="OpenAI 模型">
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    <option value="gpt-4">GPT-4</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                </optgroup>
+                <optgroup label="DeepSeek 模型">
+                    <option value="deepseek-chat">DeepSeek Chat</option>
+                    <option value="deepseek-coder">DeepSeek Coder</option>
+                    <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+                </optgroup>
+            </select>
+        </div>
+        <div class="config-item">
+            <label for="temperatureSlider">创造性 (Temperature): <span id="temperatureValue">0.7</span></label>
+            <input type="range" id="temperatureSlider" min="0" max="2" step="0.1" value="0.7">
+        </div>
+        <div class="config-item">
+            <label for="maxTokensInput">最大令牌数:</label>
+            <input type="number" id="maxTokensInput" min="100" max="4000" value="1000" placeholder="1000">
+        </div>
+        <div class="config-item">
+            <label for="useWebSocketToggle">
+                <input type="checkbox" id="useWebSocketToggle" checked> 使用WebSocket (实时通信)
+            </label>
+        </div>
+        <div class="config-actions">
+            <button onclick="saveConfig()">💾 保存配置</button>
+            <button onclick="resetConfig()">🔄 重置默认</button>
+            <button onclick="clearChatHistory()" style="background: #dc3545;">🗑️ 清除历史</button>
+            <button onclick="exportConfig()" style="background: #28a745;">📤 导出配置</button>
+            <button onclick="importConfig()" style="background: #17a2b8;">📥 导入配置</button>
+            <button onclick="toggleConfig()">❌ 关闭</button>
+        </div>
+        <input type="file" id="configFileInput" accept=".json" style="display: none;" onchange="handleConfigImport(event)">
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="status-indicator" id="statusIndicator"></div>
+            <h1>🤖 MCP LangChain 助手</h1>
+            <div class="subtitle">基于HTTP MCP协议的智能对话系统</div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message assistant">
+                <div class="message-avatar">🤖</div>
+                <div>
+                    <div class="message-content">
+                        你好！我是基于MCP协议的LangChain助手。我可以帮你处理文件操作、回答问题等。请告诉我你需要什么帮助？
+                    </div>
+                    <div class="message-time" id="welcomeTime"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="typing-indicator" id="typingIndicator">
+            <div class="message-avatar">🤖</div>
+            <div class="typing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+
+        <div class="chat-input">
+            <div class="input-container">
+                <textarea 
+                    class="message-input" 
+                    id="messageInput" 
+                    placeholder="输入你的消息..."
+                    rows="1"
+                ></textarea>
+                <button class="send-button" id="sendButton" onclick="sendMessage()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="chat_interface.js"></script>
+</body>
+</html>
