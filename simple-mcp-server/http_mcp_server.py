@@ -102,6 +102,7 @@ except ImportError:
         tool_name: str
         arguments: Dict[str, Any]
         result: Optional[str] = None
+        
 
     class ChatResponse(BaseModel):
         success: bool
